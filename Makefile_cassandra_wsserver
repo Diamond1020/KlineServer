@@ -1,0 +1,161 @@
+
+CXX ?= g++
+CC ?= gcc
+CFLAGS ?= -O3
+LOCAL_CFLAGS = -I$(current_dir)/
+COMPILE_FLAGS = -std=c++11 -O3 -fPIC
+SRC_EXT = cpp
+
+CURR_DIR = $(shell pwd)
+CPPDRIVER_DIR = $(CURR_DIR)/cpp-driver
+WSS_DIR = $(CURR_DIR)/Simple-WebSocket-Server
+BLD_DIR = $(CURR_DIR)/bld
+INCLUDES = -I include/ -I /usr/local/include 
+LIBS =  $(BLD_CPPDRV_DIR)/libcassandra.a \
+		$(BLD_CURL_DIR)/libcurl3p.a \
+		$(BLD_CURL_DIR)/libhdr3p.a \
+		$(BLD_CURL_DIR)/libhttp_parser3p.a \
+		$(BLD_CURL_DIR)/libminizip3p.a \
+		-luv -lssl -lcrypto -lpthread -lz
+
+.PHONY: all clean 
+all: wss cpp_driver curl hdr_histogram http_parser minizip
+clean: cpp_driver_clean curl_clean hdr_histogram_clean http_parser_clean minizip_clean
+
+#wss
+.PHONY: wss wss_clean
+wss: cpp_driver
+	$(CC) -O3 -DNDEBUG $(INC_CPPDRV) -I $(WSS_DIR) -MP -MMD -fPIC -c $(WSS_DIR)/wsserver.cpp -o $(BLD_DIR)/wsserver.o
+	$(CXX) $(BLD_DIR)/wsserver.o -o $(BLD_DIR)/wsserver -L$(BLD_DIR) $(LIBS) -lboost_system -lrt
+
+wss_clean:
+	rm -rf $(BLD_DIR)/wsserver
+	rm -rf $(BLD_DIR)/wsserver.o
+
+#cpp_driver
+.PHONY: cpp_driver cpp_driver_clean
+SRC_CPPDRV_DIR = $(CPPDRIVER_DIR)/src
+BLD_CPPDRV_DIR = $(BLD_DIR)
+
+INC_CPPDRV = -I $(CPPDRIVER_DIR)/include/ -I /usr/include -I /usr/local/include -I $(SRC_CPPDRV_DIR) \
+			 -I $(SRC_CPPDRV_DIR)/third_party/curl -I $(SRC_CPPDRV_DIR)/third_party/hdr_histogram \
+			 -I $(SRC_CPPDRV_DIR)/third_party/http-parser -I $(SRC_CPPDRV_DIR)/third_party/minizip \
+			 -I $(SRC_CPPDRV_DIR)/third_party/mt19937_64 -I $(SRC_CPPDRV_DIR)/third_party/rapidjson/rapidjson \
+			 -I $(SRC_CPPDRV_DIR)/third_party/sparsehash/src
+
+SRC_CPPDRV0 = $(wildcard $(SRC_CPPDRV_DIR)/*.cpp)
+SRC_CPPDRV1 = $(filter-out  $(SRC_CPPDRV_DIR)/get_time-mac.cpp,$(SRC_CPPDRV0))
+SRC_CPPDRV = $(filter-out  $(SRC_CPPDRV_DIR)/get_time-win.cpp,$(SRC_CPPDRV1))
+
+SRC_CPPDRV += $(SRC_CPPDRV_DIR)/ssl/ssl_openssl_impl.cpp $(SRC_CPPDRV_DIR)/ssl/ring_buffer_bio.cpp
+OBJ_CPPDRV = $(SRC_CPPDRV:$(SRC_CPPDRV_DIR)/%.cpp=$(BLD_CPPDRV_DIR)/%.o)
+
+DEPS_CPPDRV = $(OBJ_CPPDRV:.o=.d)
+
+bld_cppdrv_dir:
+	mkdir -p $(BLD_CURL_DIR)/ssl
+
+$(OBJ_CPPDRV): $(BLD_CPPDRV_DIR)/%.o: $(SRC_CPPDRV_DIR)/%.cpp
+	$(CXX) $(CXXFLAGS) $(COMPILE_FLAGS) $(INC_CPPDRV) -MP -MMD -c $< -o $@
+
+$(BLD_CPPDRV_DIR)/libcassandra.a: $(OBJ_CPPDRV)
+	ar rcs $@ $(OBJ_CPPDRV)
+
+cpp_driver: bld_cppdrv_dir curl hdr_histogram http_parser minizip
+cpp_driver: $(BLD_CPPDRV_DIR)/libcassandra.a
+cpp_driver_clean:
+	rm -rf $(BLD_CPPDRV_DIR)/libcassandra.a
+	rm -rf $(OBJ_CPPDRV)
+
+#curl3p
+.PHONY: curl curl_clean
+SRC_CURL_DIR = $(CPPDRIVER_DIR)/src/third_party/curl
+BLD_CURL_DIR = $(BLD_DIR)
+SRC_CURL = $(shell find $(SRC_CURL_DIR) -name '*.cpp' | sort -k 1nr | cut -f2-)
+OBJ_CURL = $(SRC_CURL:$(SRC_CURL_DIR)/%.cpp=$(BLD_CURL_DIR)/%.o)
+DEPS_CURL = $(OBJ_CURL:.o=.d)
+
+bld_curl_dir:
+	mkdir -p $(BLD_CURL_DIR)
+
+$(OBJ_CURL): $(BLD_CURL_DIR)/%.o: $(SRC_CURL_DIR)/%.cpp
+	$(CXX) $(CXXFLAGS) $(COMPILE_FLAGS) $(INCLUDES) -MP -MMD -c $< -o $@
+
+$(BLD_CURL_DIR)/libcurl3p.a: $(OBJ_CURL)
+	ar rcs $@ $(OBJ_CURL)
+
+curl: bld_curl_dir
+curl: $(BLD_CURL_DIR)/libcurl3p.a
+curl_clean:
+	rm -rf $(BLD_CURL_DIR)/libcurl3p.a
+	rm -rf $(OBJ_CURL)
+
+#hdr_histogram3p
+.PHONY: hdr_histogram hdr_histogram_clean
+SRC_HDR_DIR = $(CPPDRIVER_DIR)/src/third_party/hdr_histogram
+BLD_HDR_DIR = $(BLD_DIR)
+SRC_HDR = $(shell find $(SRC_HDR_DIR) -name '*.cpp' | sort -k 1nr | cut -f2-)
+OBJ_HDR = $(SRC_HDR:$(SRC_HDR_DIR)/%.cpp=$(BLD_HDR_DIR)/%.o)
+DEPS_HDR = $(OBJ_HDR:.o=.d)
+
+bld_hdr_dir:
+	mkdir -p $(BLD_HDR_DIR)
+
+$(OBJ_HDR): $(BLD_HDR_DIR)/%.o: $(SRC_HDR_DIR)/%.cpp
+	$(CXX) $(CXXFLAGS) $(COMPILE_FLAGS) $(INCLUDES) -MP -MMD -c $< -o $@
+
+$(BLD_HDR_DIR)/libhdr3p.a: $(OBJ_HDR)
+	ar rcs $@ $(OBJ_HDR)
+
+hdr_histogram: bld_hdr_dir
+hdr_histogram: $(BLD_HDR_DIR)/libhdr3p.a
+hdr_histogram_clean:
+	rm -rf $(BLD_HDR_DIR)/libhdr3p.a
+	rm -rf $(OBJ_HDR)
+
+#http_parser3p
+.PHONY: http_parser http_parser_clean
+SRC_HTTPP_DIR = $(CPPDRIVER_DIR)/src/third_party/http-parser
+BLD_HTTPP_DIR = $(BLD_DIR)
+SRC_HTTPP = $(SRC_HTTPP_DIR)/http_parser.c
+OBJ_HTTPP = $(SRC_HTTPP:$(SRC_HTTPP_DIR)/%.c=$(BLD_HTTPP_DIR)/%.o)
+DEPS_HTTPP = $(OBJ_HTTPP:.o=.d)
+
+bld_httpp_dir:
+	mkdir -p $(BLD_HTTPP_DIR)
+
+$(OBJ_HTTPP): $(BLD_HTTPP_DIR)/%.o: $(SRC_HTTPP)
+	$(CC) $(CFLAGS) -fPIC $(INCLUDES) -MP -MMD -c $< -o $@
+
+$(BLD_HTTPP_DIR)/libhttp_parser3p.a: $(OBJ_HTTPP)
+	ar rcs $@ $(OBJ_HTTPP)
+
+http_parser: bld_httpp_dir
+http_parser: $(BLD_HTTPP_DIR)/libhttp_parser3p.a
+http_parser_clean:
+	rm -rf $(BLD_HTTPP_DIR)/libhttp_parser3p.a
+	rm -rf $(OBJ_HTTPP)
+
+#minizip3p
+.PHONY: minizip minizip_clean
+SRC_MINIZIP_DIR = $(CPPDRIVER_DIR)/src/third_party/minizip
+BLD_MINIZIP_DIR = $(BLD_DIR)
+SRC_MINIZIP = $(SRC_MINIZIP_DIR)/ioapi.c $(SRC_MINIZIP_DIR)/unzip.c
+OBJ_MINIZIP = $(SRC_MINIZIP:$(SRC_MINIZIP_DIR)/%.c=$(BLD_MINIZIP_DIR)/%.o)
+DEPS_MINIZIP = $(OBJ_MINIZIP:.o=.d)
+
+bld_minizip_dir:
+	mkdir -p $(BLD_MINIZIP_DIR)
+
+$(OBJ_MINIZIP): $(BLD_MINIZIP_DIR)/%.o: $(SRC_MINIZIP_DIR)/%.c
+	$(CC) $(CFLAGS) -fPIC $(INCLUDES) -MP -MMD -c $< -o $@
+
+$(BLD_MINIZIP_DIR)/libminizip3p.a: $(OBJ_MINIZIP)
+	ar rcs $@ $(OBJ_MINIZIP)
+
+minizip: bld_minizip_dir
+minizip: $(BLD_MINIZIP_DIR)/libminizip3p.a
+minizip_clean:
+	rm -rf $(BLD_MINIZIP_DIR)/libminizip3p.a
+	rm -rf $(OBJ_MINIZIP)
+

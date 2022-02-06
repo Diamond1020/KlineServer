@@ -1,0 +1,146 @@
+
+CXX ?= g++
+CC ?= gcc
+CFLAGS ?= -O3
+LOCAL_CFLAGS = -I$(current_dir)/
+COMPILE_FLAGS = -std=c++11 -O3 -Wall -Wextra -fPIC
+SRC_EXT = cpp
+
+CURR_DIR = $(shell pwd)
+BLD_DIR = $(CURR_DIR)/bld
+
+SRC_BINANCE_DIR = $(CURR_DIR)/src
+BLD_BINANCE_DIR = $(CURR_DIR)/bld/binance
+
+BINANCE_SOURCES = $(shell find $(SRC_BINANCE_DIR) -name '*.$(SRC_EXT)' | sort -k 1nr | cut -f2-)
+BINANCE_OBJECTS = $(BINANCE_SOURCES:$(SRC_BINANCE_DIR)/%.$(SRC_EXT)=$(BLD_BINANCE_DIR)/%.o)
+BINANCE_DEPS = $(BINANCE_OBJECTS:.o=.d)
+INCLUDES = -I include/ -I /usr/local/include \
+		   -I $(INC_MBEDTLS_DIR) -I $(CURL_DIR)/include -I $(JSON_DIR)/include -I $(BLD_LWS_DIR)/include
+LIBS =  $(BLD_LWS_DIR)/lib/libwebsockets.a \
+		$(BLD_CURL_DIR)/lib/libcurl.a \
+		-L$(LIB_MBEDTLS_DIR) -lmbedtls -lmbedx509 -lmbedcrypto \
+		$(BLD_JSON_DIR)/src/lib_json/libjsoncpp.a \
+		-lpthread -lz
+
+.PHONY: all clean 
+all: binance example thirdparty
+clean: binance_clean example_clean thirdparty_clean
+
+# BINANCE LIB:
+.PHONY: binance_dir binance_link binance binance_clean
+
+BINANCE_LIB = $(BLD_DIR)/libbinance.so
+
+binance_dir:
+	mkdir -p $(BLD_BINANCE_DIR)
+
+$(BLD_BINANCE_DIR)/%.o: $(SRC_BINANCE_DIR)/%.$(SRC_EXT)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -MP -MMD -c $< -o $@
+
+binance_link: $(BINANCE_OBJECTS)
+	$(CXX) $(BINANCE_OBJECTS) -o $(BINANCE_LIB) $(LIBS) -shared
+
+binance: export CXXFLAGS := $(CXXFLAGS) $(COMPILE_FLAGS)
+binance: thirdparty
+binance: binance_dir
+	make binance_link
+
+binance_clean:
+	rm -rf $(BLD_BINANCE_DIR)
+	rm -rf $(BINANCE_LIB)
+
+# EXAMPLE 
+.PHONY: example
+EXAMPLE_COMPILE_FLAFS = -O3 -Wall -Wextra -DNDEBUG
+example: binance
+	$(CXX) $(EXAMPLE_COMPILE_FLAFS) $(INCLUDES) -MP -MMD -c example.cpp -o $(BLD_DIR)/example.o
+	$(CXX)  $(BLD_DIR)/example.o -o $(BLD_DIR)/example -Wl,-rpath,$(BLD_DIR) -L$(BLD_DIR) -lbinance $(LIBS)
+
+example_clean:
+	rm -rf bld/example.o
+	rm -rf bld/example
+
+# 3RD PARTY
+.PHONY: thirdparty thirdparty_clean
+thirdparty: json mbedtls curl lws
+thirdparty_clean: json_clean mbedtls_clean curl_clean lws_clean
+
+## JSONCPP
+.PHONY: json json_clean
+BLD_JSON_DIR = $(BLD_DIR)/jsoncpp
+JSON_DIR = $(CURR_DIR)/ThirdParty/jsoncpp
+JSON_OPTIONS = -DJSONCPP_WITH_TESTS=OFF -DJSONCPP_WITH_PKGCONFIG_SUPPORT=OFF
+$(BLD_JSON_DIR)/Makefile:
+	mkdir -p $(dir $@)
+	cd $(dir $@); cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON $(JSON_OPTIONS) $(JSON_DIR) 
+	
+json: $(BLD_JSON_DIR)/Makefile
+	make -C $(BLD_JSON_DIR) jsoncpp_lib_static
+json_clean:
+	make -C $(BLD_JSON_DIR) clean
+
+## MBEDTLS
+.PHONY: mbedtls mbedtls_clean
+BLD_MBEDTLS_DIR = $(BLD_DIR)/mbedtls
+MBEDTLS_DIR = $(CURR_DIR)/ThirdParty/mbedtls
+INC_MBEDTLS_DIR = $(BLD_MBEDTLS_DIR)/inc
+LIB_MBEDTLS_DIR = $(BLD_MBEDTLS_DIR)/lib
+INC_MBEDTLS_DIRS = $(INC_MBEDTLS_DIR)/mbedtls $(INC_MBEDTLS_DIR)/psa
+
+MBEDTLS_H = $(MBEDTLS_DIR)/crypto/include/mbedtls $(MBEDTLS_DIR)/include/mbedtls $(MBEDTLS_DIR)/crypto/include/psa
+MBEDTLS_A = $(BLD_MBEDTLS_DIR)/library/libmbedtls.a $(BLD_MBEDTLS_DIR)/library/libmbedx509.a $(BLD_MBEDTLS_DIR)/crypto/library/libmbedcrypto.a
+
+$(INC_MBEDTLS_DIRS) $(LIB_MBEDTLS_DIR):
+	mkdir -p $@
+
+$(BLD_MBEDTLS_DIR)/Makefile:
+	mkdir -p $(dir $@)
+	cd $(dir $@); cmake -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCMAKE_BUILD_TYPE=Release $(MBEDTLS_DIR)
+
+mbedtls_make: $(BLD_MBEDTLS_DIR)/Makefile
+	make -C $(BLD_MBEDTLS_DIR) mbedtls
+	
+$(MBEDTLS_H): mbedtls_make $(INC_MBEDTLS_DIRS)
+	cp -rp $@ $(INC_MBEDTLS_DIR)
+
+$(MBEDTLS_A): mbedtls_make $(LIB_MBEDTLS_DIR)
+	cp -rp $@ $(LIB_MBEDTLS_DIR)
+
+mbedtls: $(MBEDTLS_A) $(MBEDTLS_H)
+mbedtls_clean:
+	make -C $(BLD_MBEDTLS_DIR) clean
+	rm -rf $(LIB_MBEDTLS_DIR)
+	rm -rf $(INC_MBEDTLS_DIR)
+
+## CURL
+.PHONY: curl curl_clean
+BLD_CURL_DIR = $(BLD_DIR)/curl
+CURL_DIR = $(CURR_DIR)/ThirdParty/curl
+CURL_OPTIONS = -DCMAKE_USE_MBEDTLS=ON -DBUILD_CURL_EXE=OFF -DBUILD_SHARED_LIBS=OFF BUILD_TESTING=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+			   -DMBEDTLS_LIBRARY="$(LIB_MBEDTLS_DIR)/libmbedtls.a" -DMBEDX509_LIBRARY="$(LIB_MBEDTLS_DIR)/libmbedx509.a" \
+			   -DMBEDCRYPTO_LIBRARY="$(LIB_MBEDTLS_DIR)/libmbedcrypto.a"
+$(BLD_CURL_DIR)/Makefile:
+	mkdir -p $(dir $@)
+	cd $(dir $@); cmake -DCMAKE_BUILD_TYPE=Release $(CURL_OPTIONS) -DMBEDTLS_INCLUDE_DIRS="$(INC_MBEDTLS_DIR)" \
+						-DMBEDTLS_LIBRARIES="$(LIB_MBEDTLS_DIR)" $(CURL_DIR) 
+	
+curl: mbedtls $(BLD_CURL_DIR)/Makefile
+	make -C $(BLD_CURL_DIR)
+curl_clean:
+	make -C $(BLD_CURL_DIR) clean
+
+## LWS
+.PHONY: lws lws_clean
+BLD_LWS_DIR = $(BLD_DIR)/lws
+LWS_DIR = $(CURR_DIR)/ThirdParty/libwebsockets
+LWS_OPTIONS = -DLWS_STATIC_PIC==ON -DLWS_WITH_SSL=OFF -DLWS_WITH_MBEDTLS=ON -DLWS_WITH_EXPORT_LWSTARGETS=OFF -LWS_WITH_SHARED=OFF
+$(BLD_LWS_DIR)/Makefile:
+	mkdir -p $(dir $@)
+	cd $(dir $@); cmake -DCMAKE_BUILD_TYPE=Release $(LWS_OPTIONS) -DMBEDTLS_INCLUDE_DIRS="$(INC_MBEDTLS_DIR)" \
+						-DMBEDTLS_LIBRARIES="-L$(LIB_MBEDTLS_DIR) -lmbedtls -lmbedx509 -lmbedcrypto" $(LWS_DIR) 
+	
+lws: mbedtls $(BLD_LWS_DIR)/Makefile
+	make -C $(BLD_LWS_DIR) websockets
+lws_clean:
+	make -C $(BLD_LWS_DIR) clean
